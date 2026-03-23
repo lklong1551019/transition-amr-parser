@@ -2,6 +2,9 @@
 # environment setter. May contain keys and other THIS CAN NOT BE COMMITED
 set_environment.sh
 
+# Our datasets
+wiki_data_parsed_*.txt
+
 # git
 *.orig
 .mailmap
