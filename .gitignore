@@ -4,6 +4,11 @@ set_environment.sh
 
 # Our datasets
 wiki_data_parsed_*.txt
+input_datasets/
+train_vi_docs/
+train_en_docs/
+tst2013_vi_docs/
+tst2013_en_docs/
 
 # git
 *.orig
