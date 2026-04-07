@@ -11,16 +11,31 @@ def is_title_line(sentence):
     if " : " not in sentence:
         return False
         
-    # True title lines rarely end with terminal punctuation. 
-    # Q&A dialogue (e.g., "Max : Thank you .") always does.
-    if sentence.strip().endswith((".", "?", "!", '"', "&quot;")):
+    prefix = sentence.split(" : ")[0].strip()
+    words = prefix.split()
+    if not words:
         return False
         
-    prefix = sentence.split(" : ")[0]
-    words = prefix.split()
-    
     # Reject if the prefix is too long to reasonably be a name/speaker list
     if len(words) > 10:
+        return False
+        
+    # Reject conversational prefixes that mimic speaker tags
+    first_word = words[0].lower()
+    conversational_starters = {
+        "and", "but", "so", "now", "the", "my", "i", "we", "he", "she", "they", 
+        "what", "which", "why", "it", "this", "another", "or", "then", "first", 
+        "second", "third", "number", "a", "an", "here", "there", "because", "when", 
+        "how", "if", "well", "yes", "no", "that", "these", "those", "one", "two", 
+        "three", "some", "someone", "everyone", "nobody", "anybody", "something",
+        "let's", "let", "education", "question", "questions", "enigma"
+    }
+    if first_word in conversational_starters:
+        return False
+
+    # True title lines rarely end with periods or quotes.
+    # We explicitly allow '?' and '!' since many TED talks have them in the title.
+    if sentence.strip().endswith((".", '"', "&quot;")):
         return False
             
     return True
