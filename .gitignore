@@ -5,6 +5,7 @@ set_environment.sh
 # Our datasets
 input_datasets/
 output_dataset_doc/
+output_dataset_amr/
 
 # git
 *.orig
