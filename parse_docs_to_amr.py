@@ -18,10 +18,16 @@ Defaults:
 """
 
 import os
-from typing import List
+from typing import List, Set
 import sys
+import json
+import re
 
 from transition_amr_parser.parse import AMRParser
+
+
+# Global set to collect all unique relations (labels) across all parsed documents
+all_unique_relations: Set[str] = set()
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +60,12 @@ def parse_sentences(sentences: List[str], batch_size: int = 32) -> List[str]:
         _, machines = parser.parse_sentences(tokenized)
 
         for idx, machine in zip(indices, machines):
-            result[idx] = machine.get_amr().to_penman(jamr=True, isi=False)
+            amr = machine.get_amr()
+            result[idx] = amr.to_penman(jamr=True, isi=False)
+            
+            # Collect all relation labels from the AMR edges
+            for _, rel, _ in amr.edges:
+                all_unique_relations.add(rel)
 
     return result
 
@@ -153,3 +164,28 @@ if __name__ == "__main__":
         process_folder(en_folder, out_folder)
 
     print("\nAll documents parsed. AMR files are in:", output_base)
+
+    # ------------------------------------------------------------------
+    # Save all unique relations to custom_relation_amrs.json in the root folder
+    # ------------------------------------------------------------------
+    root_dir = os.path.dirname(os.path.abspath(__file__))
+    rel_file_path = os.path.join(root_dir, "custom_relation_amrs.json")
+    
+    print(f"Saving {len(all_unique_relations)} unique relations to {rel_file_path}...")
+    with open(rel_file_path, 'w', encoding='utf-8') as f:
+        json.dump(sorted(list(all_unique_relations)), f, indent=4)
+
+    # ------------------------------------------------------------------
+    # Save simple unique relations (without trailing numbers)
+    # ------------------------------------------------------------------
+    simple_relations = set()
+    for rel in all_unique_relations:
+        simple_rel = re.sub(r'\d+(?=-of$|$)', '', rel)
+        simple_relations.add(simple_rel)
+        
+    simple_rel_file_path = os.path.join(root_dir, "custom_relation_amrs_simple.json")
+    print(f"Saving {len(simple_relations)} simple relations to {simple_rel_file_path}...")
+    with open(simple_rel_file_path, 'w', encoding='utf-8') as f:
+        json.dump(sorted(list(simple_relations)), f, indent=4)
+    
+    print("Done.")
