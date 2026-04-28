@@ -17,6 +17,8 @@ PROGRESS*
 DATA*
 *.zip
 *.json
+!amrs_token.json
+!amrs_token_simple.json
 *.npy
 # *.npy.*
 

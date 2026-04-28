@@ -26,8 +26,9 @@ import re
 from transition_amr_parser.parse import AMRParser
 
 
-# Global set to collect all unique relations (labels) across all parsed documents
+# Global sets to collect all unique relations and concepts across all parsed documents
 all_unique_relations: Set[str] = set()
+all_unique_concepts: Set[str] = set()
 
 
 # ---------------------------------------------------------------------------
@@ -36,6 +37,22 @@ all_unique_relations: Set[str] = set()
 print("Loading AMR parser model (AMR3-structbart-L)...")
 parser = AMRParser.from_pretrained('AMR3-structbart-L')
 print("Parser ready.\n")
+
+# ---------------------------------------------------------------------------
+# Load BERT vocab to filter out common words
+# ---------------------------------------------------------------------------
+bert_vocab: Set[str] = set()
+bert_vocab_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "multi-bert-base-cased-vocab.txt")
+if os.path.exists(bert_vocab_file):
+    print(f"Loading BERT vocab from {os.path.basename(bert_vocab_file)}...")
+    with open(bert_vocab_file, 'r', encoding='utf-8') as f:
+        for line in f:
+            bert_vocab.add(line.strip())
+    print(f"Loaded {len(bert_vocab)} vocab items.\n")
+
+def is_number(s: str) -> bool:
+    return bool(re.match(r'^-?\d+(?:\.\d+)?$', s))
+
 
 
 def parse_sentences(sentences: List[str], batch_size: int = 32) -> List[str]:
@@ -63,9 +80,24 @@ def parse_sentences(sentences: List[str], batch_size: int = 32) -> List[str]:
             amr = machine.get_amr()
             result[idx] = amr.to_penman(jamr=True, isi=False)
             
-            # Collect all relation labels from the AMR edges
+            # 1. Collect all relation labels (e.g., :ARG0, :snt1)
             for _, rel, _ in amr.edges:
                 all_unique_relations.add(rel)
+
+            # 2. Refined Concept Collection
+            for concept in amr.nodes.values():
+                if not concept or (concept.startswith('"') and concept.endswith('"')):
+                    continue
+                if is_number(concept):
+                    continue
+                
+                # ONLY keep AMR frames (e.g., say-01, think-91)
+                # and core structural concepts
+                is_frame = bool(re.search(r'-[0-9]{2,}$', concept))
+                is_structural = concept in ['person', 'thing', 'date-entity', 'government-organization', 'amr-unknown']
+                
+                if is_frame or is_structural:
+                    all_unique_concepts.add(concept)
 
     return result
 
@@ -166,26 +198,40 @@ if __name__ == "__main__":
     print("\nAll documents parsed. AMR files are in:", output_base)
 
     # ------------------------------------------------------------------
-    # Save all unique relations to custom_relation_amrs.json in the root folder
+    # Save all unique relations and concepts to amrs_token.json
     # ------------------------------------------------------------------
     root_dir = os.path.dirname(os.path.abspath(__file__))
-    rel_file_path = os.path.join(root_dir, "custom_relation_amrs.json")
+    combined_original = all_unique_relations | all_unique_concepts
     
-    print(f"Saving {len(all_unique_relations)} unique relations to {rel_file_path}...")
+    # Filter out anything already in BERT vocab
+    combined_original = {x for x in combined_original if x not in bert_vocab}
+    
+    rel_file_path = os.path.join(root_dir, "amrs_token.json")
+    
+    print(f"Saving {len(combined_original)} items (relations + concepts) to {rel_file_path}...")
     with open(rel_file_path, 'w', encoding='utf-8') as f:
-        json.dump(sorted(list(all_unique_relations)), f, indent=4)
+        json.dump(sorted(list(combined_original)), f, indent=4)
 
     # ------------------------------------------------------------------
-    # Save simple unique relations (without trailing numbers)
+    # Save simple unique relations and concepts (without trailing numbers)
     # ------------------------------------------------------------------
-    simple_relations = set()
+    simple_items = set()
+    
+    # Simplify relations: e.g., :ARG1 -> :ARG, :snt1 -> :snt
     for rel in all_unique_relations:
         simple_rel = re.sub(r'\d+(?=-of$|$)', '', rel)
-        simple_relations.add(simple_rel)
+        if simple_rel not in bert_vocab:
+            simple_items.add(simple_rel)
         
-    simple_rel_file_path = os.path.join(root_dir, "custom_relation_amrs_simple.json")
-    print(f"Saving {len(simple_relations)} simple relations to {simple_rel_file_path}...")
+    # Simplify concepts: e.g., say-01 -> say
+    for concept in all_unique_concepts:
+        simple_concept = re.sub(r'-\d+$', '', concept)
+        if simple_concept not in bert_vocab:
+            simple_items.add(simple_concept)
+        
+    simple_rel_file_path = os.path.join(root_dir, "amrs_token_simple.json")
+    print(f"Saving {len(simple_items)} simple items to {simple_rel_file_path}...")
     with open(simple_rel_file_path, 'w', encoding='utf-8') as f:
-        json.dump(sorted(list(simple_relations)), f, indent=4)
+        json.dump(sorted(list(simple_items)), f, indent=4)
     
     print("Done.")
