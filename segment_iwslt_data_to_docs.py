@@ -1,6 +1,46 @@
 import os
 import sys
 import re
+from typing import List
+
+
+def split_sentences(text: str) -> List[str]:
+    """
+    Simple sentence splitter using regex.
+    Splits on . ! ? ONLY if followed by an uppercase letter (with or without whitespace).
+    Avoids splitting after single-letter acronyms (e.g., U.S.A.) when whitespace is missing.
+    Also strips leading ellipses (...) from sentences.
+    """
+    # Uses multiple fixed-width look-behinds to keep punctuation with the sentence.
+    sents = re.split(r'(?<=[.!?])\s+(?=[A-Z])|(?<=[.!?]["\'])\s+(?=[A-Z])|(?<!\b[A-Z][.!?])(?<=[.!?])(?=[A-Z])|(?<!\b[A-Z][.!?])(?<=[.!?]["\'])(?=[A-Z])', text)
+    
+    cleaned = []
+    for s in sents:
+        s = s.strip()
+        # Strip leading ellipses (...) and optional space
+        s = re.sub(r'^\.\.\.\s*|^\.\.\s*', '', s)
+        if s:
+            cleaned.append(s)
+    return cleaned
+
+
+def split_and_report(line: str, title: str, line_idx: int) -> List[str]:
+    """
+    Splits a line into sentences and prints a report if multiple sentences are found.
+    Now includes the line index in the report.
+    """
+    sents = split_sentences(line)
+    if len(sents) > 1:
+        print(f"\n[MULTI-SENTENCE] Document: {title} (Line {line_idx})")
+        print(f"Original line: {line}")
+        for i, s in enumerate(sents):
+            print(f"  Sent {i+1}: {s}")
+    return sents
+
+
+MAX_LINES = 250
+MAX_WORDS = 5000
+SKIPPED_DOCS = set()  # Tracks documents to skip: "prefix:doc_idx"
 
 
 def extract_documents(filepath):
@@ -10,12 +50,17 @@ def extract_documents(filepath):
     followed by plain-text transcript lines.
     """
     basename = os.path.basename(filepath)
+    is_en = basename.endswith(".en")
+
     if basename == "train.tags.en-vi.en":
         output_dir_name = "train_en-vi.en"
     elif basename == "train.tags.en-vi.vi":
         output_dir_name = "train_en-vi.vi"
     else:
         output_dir_name = basename.replace(".tags.", "_")
+    
+    # Prefix for identifying parallel documents across languages
+    prefix = re.sub(r'\.(en|vi)$', '', output_dir_name)
 
     output_dir = os.path.join("output_dataset_doc", output_dir_name)
     os.makedirs(output_dir, exist_ok=True)
@@ -28,6 +73,7 @@ def extract_documents(filepath):
 
     total_docs = 0
     total_words = 0
+    total_skipped = 0
     print(f"\n--- Extraction Results for folder: {output_dir} ---")
 
     doc_idx = 1
@@ -56,18 +102,39 @@ def extract_documents(filepath):
         raw_transcript = re.sub(r'<[^>]+/>', '', raw_transcript, flags=re.DOTALL)
 
         transcript_text = raw_transcript.strip()
-
-        parts = []
+        transcript_lines = transcript_text.split('\n')
+        
+        new_parts = []
         if title_text:
-            parts.append(title_text)
+            new_parts.append(title_text)
         if desc_text:
-            parts.append(desc_text)
+            # We treat description as line 0 if title is 1
+            new_parts.extend(split_and_report(desc_text, title_text, 0))
+        
         if transcript_text:
-            parts.append(transcript_text)
+            for i, line in enumerate(transcript_lines, start=1):
+                if line.strip():
+                    new_parts.extend(split_and_report(line, title_text, i))
 
-        doc_content = "\n".join(parts)
+        doc_content = "\n".join(new_parts)
 
         if doc_content:
+            skip_key = f"{prefix}:{doc_idx}"
+            
+            # If English file, check for limits
+            if is_en:
+                line_count = len(doc_content.split('\n'))
+                word_count = sum(len(line.split()) for line in doc_content.split('\n'))
+                if line_count > MAX_LINES or word_count > MAX_WORDS:
+                    SKIPPED_DOCS.add(skip_key)
+                    print(f"Dropped oversized document: {skip_key} (Lines: {line_count}, Words: {word_count})")
+
+            # Check if this document index was marked to be skipped
+            if skip_key in SKIPPED_DOCS:
+                doc_idx += 1
+                total_skipped += 1
+                continue
+
             out_file = os.path.join(output_dir, f"doc-{doc_idx}.txt")
             with open(out_file, 'w', encoding='utf-8') as out:
                 out.write(doc_content)
@@ -77,7 +144,7 @@ def extract_documents(filepath):
             total_docs += 1
             doc_idx += 1
 
-    print(f"Total for '{output_dir}': {total_docs} document files, {total_words} words.")
+    print(f"Total for '{output_dir}': {total_docs} documents created, {total_skipped} documents dropped, {total_words} words.")
 
 
 def extract_xml_documents(filepath):
@@ -91,15 +158,18 @@ def extract_xml_documents(filepath):
       IWSLT15.TED.tst2015.en-vi.en.xml  ->  tst2015.en-vi.en
     """
     basename = os.path.basename(filepath)
+    is_en = basename.endswith(".en.xml")
 
     # Strip leading "IWSLT<year>.TED." prefix and ".xml" extension.
-    # e.g. "IWSLT15.TED.tst2015.en-vi.en.xml" -> "tst2015.en-vi.en"
-    name_no_ext = os.path.splitext(basename)[0]       # IWSLT15.TED.tst2015.en-vi.en
-    parts = name_no_ext.split(".", 2)                  # ["IWSLT15", "TED", "tst2015.en-vi.en"]
+    name_no_ext = os.path.splitext(basename)[0]
+    parts = name_no_ext.split(".", 2)
     if len(parts) == 3 and parts[1].upper() == "TED":
-        output_dir_name = parts[2]                     # tst2015.en-vi.en
+        output_dir_name = parts[2]
     else:
-        output_dir_name = name_no_ext                  # fallback
+        output_dir_name = name_no_ext
+    
+    # Prefix for identifying parallel documents across languages
+    prefix = re.sub(r'\.(en|vi)$', '', output_dir_name)
 
     output_dir = os.path.join("output_dataset_doc", output_dir_name)
     os.makedirs(output_dir, exist_ok=True)
@@ -112,6 +182,7 @@ def extract_xml_documents(filepath):
 
     total_docs = 0
     total_words = 0
+    total_skipped = 0
     print(f"\n--- Extraction Results for folder: {output_dir} ---")
 
     for doc_idx, block in enumerate(doc_blocks, start=1):
@@ -126,11 +197,28 @@ def extract_xml_documents(filepath):
         parts = []
         if title_text:
             parts.append(title_text)
-        parts.extend(seg_texts)
+        
+        for i, seg in enumerate(seg_texts, start=1):
+            parts.extend(split_and_report(seg, title_text, i))
 
         doc_content = "\n".join(parts)
 
         if doc_content:
+            skip_key = f"{prefix}:{doc_idx}"
+
+            # If English file, check for limits
+            if is_en:
+                line_count = len(doc_content.split('\n'))
+                word_count = sum(len(line.split()) for line in doc_content.split('\n'))
+                if line_count > MAX_LINES or word_count > MAX_WORDS:
+                    SKIPPED_DOCS.add(skip_key)
+                    print(f"Dropped oversized document: {skip_key} (Lines: {line_count}, Words: {word_count})")
+
+            # Check if this document index was marked to be skipped
+            if skip_key in SKIPPED_DOCS:
+                total_skipped += 1
+                continue
+
             out_file = os.path.join(output_dir, f"doc-{doc_idx}.txt")
             with open(out_file, 'w', encoding='utf-8') as out:
                 out.write(doc_content)
@@ -139,7 +227,7 @@ def extract_xml_documents(filepath):
             total_words += num_words
             total_docs += 1
 
-    print(f"Total for '{output_dir}': {total_docs} document files, {total_words} words.")
+    print(f"Total for '{output_dir}': {total_docs} documents created, {total_skipped} documents dropped, {total_words} words.")
 
 
 if __name__ == "__main__":
