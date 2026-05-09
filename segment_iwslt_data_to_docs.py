@@ -564,6 +564,10 @@ if __name__ == "__main__":
             file_groups.setdefault(prefix, {})[lang] = f
 
     for prefix, pair in sorted(file_groups.items()):
+        # TEMPORARY: Skip everything except dev and tst
+        if "dev" not in prefix and "tst" not in prefix:
+            continue
+            
         if "en" not in pair or "vi" not in pair:
             print(f"Warning: Skipping {prefix} as it doesn't have both EN and VI files.")
             continue
@@ -606,6 +610,12 @@ if __name__ == "__main__":
     
     rel_file_path = os.path.join(root_dir, "amrs_token.json")
     
+    # Load existing to append
+    if os.path.exists(rel_file_path):
+        with open(rel_file_path, 'r', encoding='utf-8') as f:
+            existing = json.load(f)
+            combined_original.update(existing)
+    
     print(f"\nSaving {len(combined_original)} items (relations + concepts) to {rel_file_path}...")
     with open(rel_file_path, 'w', encoding='utf-8') as f:
         json.dump(sorted(list(combined_original)), f, indent=4)
@@ -628,6 +638,13 @@ if __name__ == "__main__":
             simple_items.add(simple_concept)
         
     simple_rel_file_path = os.path.join(root_dir, "amrs_token_simple.json")
+    
+    # Load existing to append
+    if os.path.exists(simple_rel_file_path):
+        with open(simple_rel_file_path, 'r', encoding='utf-8') as f:
+            existing_simple = json.load(f)
+            simple_items.update(existing_simple)
+            
     print(f"Saving {len(simple_items)} simple items to {simple_rel_file_path}...")
     with open(simple_rel_file_path, 'w', encoding='utf-8') as f:
         json.dump(sorted(list(simple_items)), f, indent=4)
